@@ -1,19 +1,32 @@
 from typing import List
 import pandas as pd
+import re
+
+def _metric_phrase(metric: str) -> str:
+    m = metric.lower()
+    if re.search(r"revenue|sales|total", m):
+        return "drives topline value"
+    if re.search(r"incidents|failures|issues|errors", m):
+        return "dominates reported counts"
+    if re.search(r"share|%|percent|ratio", m):
+        return "commands the largest share"
+    return "has the highest total value"
 
 def generate_insights(df: pd.DataFrame, category_col: str, metric_cols: List[str]) -> List[str]:
     insights = []
     # 1. Which metric has the highest total value across all segments?
     metric_totals = df[metric_cols].sum()
     max_metric = metric_totals.idxmax()
-    insights.append(f"{max_metric} has the highest total value across all segments.")
+    phrase = _metric_phrase(max_metric)
+    insights.append(f"{max_metric} {phrase} across all segments.")
 
     # 2. Which segment has the highest value for each metric?
     for col in metric_cols:
         idx = df[col].idxmax()
         seg = df.loc[idx, category_col]
         val = df.loc[idx, col]
-        insights.append(f"{seg} has the highest {col} value ({val:,}).")
+        phrase = _metric_phrase(col)
+        insights.append(f"{seg} has the highest {col} value ({val:,}) and {phrase}.")
         if len(insights) >= 2:
             break
 
@@ -23,8 +36,9 @@ def generate_insights(df: pd.DataFrame, category_col: str, metric_cols: List[str
         pct_contrib = (metric_totals / total_sum * 100).round(1)
         top_metric = pct_contrib.idxmax()
         pct = pct_contrib.max()
+        phrase = _metric_phrase(top_metric)
         if pct > 50:
-            insights.append(f"{top_metric} contributes {pct:.0f}% of the total across all metrics.")
+            insights.append(f"{top_metric} {phrase}, contributing {pct:.0f}% of the total.")
 
     # 4. Detect if any metric is 2x another within same category
     for i, row in df.iterrows():
@@ -64,15 +78,11 @@ def generate_insights(df: pd.DataFrame, category_col: str, metric_cols: List[str
 if __name__ == "__main__":
     data = {
         "Segment": ["A", "B", "C"],
-        "Y1": [100, 200, 50],
-        "Y2": [300, 100, 50],
-        "Y3": [50, 400, 100],
+        "Revenue": [100, 200, 50],
+        "Incidents": [300, 100, 50],
+        "Share %": [50, 400, 100],
         "Y4": [500, 100, 50],
     }
     df = pd.DataFrame(data)
-    insights = generate_insights(df, "Segment", ["Y1", "Y2", "Y3", "Y4"])
-    print("\n".join(insights))
-    # Example output:
-    # Y4 has the highest total value across all segments.
-    # B has the highest Y3 value (400).
-    # Y4 contributes 44% of the total across all metrics. 
+    insights = generate_insights(df, "Segment", ["Revenue", "Incidents", "Share %", "Y4"])
+    print("\n".join(insights)) 

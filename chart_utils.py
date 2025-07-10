@@ -193,4 +193,17 @@ def generate_insights(df, cat_col, num_cols):
             if pct > 60:
                 insights.append(f"• {max_col} contributes over {pct:.0f}% of total in {row[cat_col]}.")
                 break
-    return insights[:3] 
+    return insights[:3]
+
+def suggest_chart_types(df, category_col, metric_cols):
+    """
+    Suggest valid chart types based on the data structure.
+    Returns a list of chart type strings.
+    """
+    n_metrics = len(metric_cols)
+    if n_metrics >= 2:
+        return ["Grouped Bar", "Stacked Bar", "Radar"]
+    elif n_metrics == 1:
+        return ["Pie", "Treemap"]
+    else:
+        return [] 

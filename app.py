@@ -1,20 +1,22 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.express as px
 from datetime import datetime
 import tempfile
 import os
+import pyperclip
 
-# Import only the new multi-metric chart utilities
 from chart_utils import (
     detect_multi_metric,
     grouped_bar_chart,
     stacked_bar_chart,
     radar_chart,
-    generate_insights,
+    suggest_chart_types,
+    MCKINSEY_COLORS,
 )
+from insight_utils import generate_insights
 
-# Page configuration
 st.set_page_config(
     page_title="ExcelInsight",
     page_icon="📊",
@@ -22,7 +24,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for branding
 st.markdown("""
 <style>
     .main-header {
@@ -32,34 +33,44 @@ st.markdown("""
         text-align: center;
         margin-bottom: 2rem;
     }
-    .stButton > button {
-        background-color: #1255b5;
-        color: white;
-        border-radius: 5px;
-        border: none;
-        padding: 0.5rem 1rem;
+    .deck-preview {
+        background: #f8f9fa;
+        border-radius: 16px;
+        width: 1280px;
+        height: 720px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 16px rgba(0,0,0,0.04);
+        padding: 32px 0;
     }
-    .stButton > button:hover {
-        background-color: #0d4a8f;
+    .slide-caption {
+        color: #888;
+        font-size: 1.1rem;
+        text-align: center;
+        margin-top: 0.5rem;
+    }
+    .insight-bullet {
+        font-size: 1.25rem;
+        margin-bottom: 0.5rem;
     }
 </style>
 """, unsafe_allow_html=True)
 
 def main():
-    """Main application function"""
-    
-    # Header
     st.markdown('<h1 class="main-header">📊 ExcelInsight</h1>', unsafe_allow_html=True)
     st.markdown("**Transform your Excel data into interactive charts and professional presentations**")
-    
-    # File upload section
+
+    deck_preview = st.checkbox("🖥️ Deck Preview Mode", value=False)
+
     st.markdown("### 📁 Upload Excel File")
     uploaded_file = st.file_uploader(
         "Choose an Excel file (.xls or .xlsx)",
         type=['xls', 'xlsx'],
         help="Maximum file size: 20 MB"
     )
-    
     if uploaded_file is not None:
         file_size = len(uploaded_file.getvalue())
         if file_size > 20 * 1024 * 1024:
@@ -95,25 +106,63 @@ def main():
             st.markdown("#### Preview of Data")
             st.dataframe(df.head(10), use_container_width=True)
 
-            # --- Multi-Metric Chart Section ---
             cat_col, num_cols = detect_multi_metric(df)
             if cat_col and num_cols:
                 st.markdown("### 📊 Multi-Metric Chart Options")
                 st.caption("💡 Suggested chart type based on data")
                 st.markdown(f"**Detected X (category):** `{cat_col}`")
                 st.markdown(f"**Detected Y (metrics):** `{', '.join(num_cols)}`")
+
+                chart_types = suggest_chart_types(df, cat_col, num_cols)
                 chart_type = st.selectbox(
-                    "Chart type",
-                    ["Grouped Bar", "Stacked Bar", "Radar"],
-                    help="Suggested based on your data structure.",
+                    "Suggested Chart Type",
+                    chart_types,
+                    help="Choose a chart style to preview.",
                 )
+
+                # Chart rendering logic
                 if chart_type == "Grouped Bar":
                     fig = grouped_bar_chart(df, cat_col, num_cols)
                 elif chart_type == "Stacked Bar":
                     fig = stacked_bar_chart(df, cat_col, num_cols)
-                else:
+                elif chart_type == "Radar":
                     fig = radar_chart(df, cat_col, num_cols)
-                st.plotly_chart(fig, use_container_width=False)
+                elif chart_type == "Pie":
+                    fig = px.pie(df, names=cat_col, values=num_cols[0], color_discrete_sequence=MCKINSEY_COLORS)
+                elif chart_type == "Treemap":
+                    fig = px.treemap(df, path=[cat_col], values=num_cols[0], color_discrete_sequence=MCKINSEY_COLORS)
+                else:
+                    fig = None
+
+                # Generate insights
+                auto_insights = generate_insights(df, cat_col, num_cols)
+                if 'edited_insights' not in st.session_state:
+                    st.session_state['edited_insights'] = auto_insights.copy()
+                # If number of insights changed, reset
+                if len(st.session_state['edited_insights']) != len(auto_insights):
+                    st.session_state['edited_insights'] = auto_insights.copy()
+
+                # Slide preview mode
+                if deck_preview:
+                    with st.container():
+                        st.markdown('<div class="deck-preview">', unsafe_allow_html=True)
+                        st.plotly_chart(fig, use_container_width=False)
+                        st.markdown("#### 🔎 Derived Insights", unsafe_allow_html=True)
+                        for i, insight in enumerate(auto_insights):
+                            edited = st.text_area(f"Edit insight {i+1}", value=st.session_state['edited_insights'][i], key=f"insight_edit_{i}")
+                            st.session_state['edited_insights'][i] = edited
+                            st.markdown(f"<div class='insight-bullet'>{edited}</div>", unsafe_allow_html=True)
+                        st.markdown('<div class="slide-caption">Looks slide-ready?</div>', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
+                else:
+                    st.plotly_chart(fig, use_container_width=False)
+                    st.markdown("#### 🔎 Derived Insights")
+                    for i, insight in enumerate(auto_insights):
+                        edited = st.text_area(f"Edit insight {i+1}", value=st.session_state['edited_insights'][i], key=f"insight_edit_{i}")
+                        st.session_state['edited_insights'][i] = edited
+                        st.markdown(f"- {edited}")
+
+                # Download PNG
                 img_bytes = fig.to_image(format="png", width=1100, height=600)
                 st.download_button(
                     label="Download PNG",
@@ -121,9 +170,15 @@ def main():
                     file_name=f"{chart_type.replace(' ', '_').lower()}.png",
                     mime="image/png",
                 )
-                st.markdown("#### 🔎 Derived Insights")
-                for insight in generate_insights(df, cat_col, num_cols):
-                    st.markdown(insight)
+
+                # Copy slide text button
+                slide_text = f"{chart_type} for {cat_col} vs {', '.join(num_cols)}\n" + "\n".join(st.session_state['edited_insights'])
+                if st.button("Copy Slide Text"):
+                    try:
+                        pyperclip.copy(slide_text)
+                        st.success("Slide text copied to clipboard!")
+                    except Exception:
+                        st.warning("Copying to clipboard is not supported in this environment.")
             else:
                 st.warning("⚠️ No suitable multi-metric chart pattern detected. Try uploading a file with one categorical and multiple numeric columns.")
         except Exception as e:
